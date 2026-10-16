@@ -37,7 +37,7 @@ export const MediScanView: React.FC<MediScanViewProps> = ({ citizen, onVoiceAnno
   const handleStartScan = () => {
     setIsScanning(true);
     setReferralSent(false);
-    onVoiceAnnounce?.('MediSkaner kapsulu aktivdir. Bütün bədən sensorları oxunur, zəhmət olmasa tərpənməyin.');
+    onVoiceAnnounce?.('MediSkaner başladıldı, nəticələr tezliklə göstəriləcək');
 
     setTimeout(() => {
       // Simulate slight variation in fresh scan

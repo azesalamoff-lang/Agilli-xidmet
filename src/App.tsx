@@ -12,7 +12,7 @@ import { ResourcesRiskView } from './components/ResourcesRiskView.tsx';
 import { CartModal } from './components/CartModal.tsx';
 import { CitizenCabinetModal } from './components/CitizenCabinetModal.tsx';
 import { INITIAL_CITIZEN } from './data/mockData.ts';
-import { speakPrompt } from './utils/voiceAssistant.ts';
+import { speakPrompt, speakCustomAzerbaijani } from './utils/voiceAssistant.ts';
 import type { AppTab, CartItem, CitizenProfile } from './types.ts';
 
 export default function App() {
@@ -40,16 +40,8 @@ export default function App() {
       setSystemNotice(null);
     }, 4500);
 
-    if (voiceEnabled && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(msg);
-        utterance.lang = 'tr-TR';
-        utterance.rate = 0.95;
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        console.warn('Speech error:', e);
-      }
+    if (voiceEnabled) {
+      speakCustomAzerbaijani(msg);
     }
   };
 

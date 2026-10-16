@@ -1,4 +1,5 @@
 // Səsli və vizual süni intellekt köməkçisi (Voice & Visual AI Guide)
+// Yalnız təmiz və orijinal Azərbaycan dilində səsləndirmə (No Turkish voices)
 
 export type VoicePromptKey =
   | 'welcome'
@@ -7,9 +8,11 @@ export type VoicePromptKey =
   | 'service_select'
   | 'doc_confirm'
   | 'mediscan_start'
+  | 'mediscan_complete'
   | 'pharmacy_scan'
   | 'payment_prompt'
-  | 'done_drone';
+  | 'done_drone'
+  | 'referral_sent';
 
 export const AI_PROMPTS: Record<VoicePromptKey, { az: string; sub: string }> = {
   welcome: {
@@ -33,8 +36,12 @@ export const AI_PROMPTS: Record<VoicePromptKey, { az: string; sub: string }> = {
     sub: 'Məlumatların düzgünlüyünü yoxlayıb elektron imzanızla təsdiq edin.'
   },
   mediscan_start: {
-    az: 'MediSkaner kapsuluna daxil olun. Bütün bədən skanı başlayır. Hərəkətsiz qalın.',
-    sub: 'MediSkaner: Sensorlar aktivdir, sağlamlıq göstəriciləri analiz edilir.'
+    az: 'MediSkaner başladıldı, nəticələr tezliklə göstəriləcək.',
+    sub: 'MediSkaner başladıldı, nəticələr tezliklə göstəriləcək.'
+  },
+  mediscan_complete: {
+    az: 'Müayinə tamamlandı. Göstəriciləriniz normadadır, əvvəlki ayla müqayisəli hesabat hazırdır.',
+    sub: 'Müayinə tamamlandı. Göstəriciləriniz normadadır, hesabat hazırdır.'
   },
   pharmacy_scan: {
     az: 'Reseptinizi skanerə yerləşdirin və ya aptek şəbəkəsindən dərmanları seçin.',
@@ -45,58 +52,247 @@ export const AI_PROMPTS: Record<VoicePromptKey, { az: string; sub: string }> = {
     sub: 'Ödəniş terminalı hazırdır.'
   },
   done_drone: {
-    az: 'Müraciətiniz qəbul olundu. Sənədiniz çap edilir və ya sifarişiniz dronla ünvanınıza yola salınır.',
+    az: 'Sifarişiniz təsdiqləndi! Dron dərhal Papravənd kəndinə yola salınır.',
     sub: 'Uğurla tamamlandı! Sənəd çap edilir və ya dronla göndərilir.'
+  },
+  referral_sent: {
+    az: 'Elektron göndəriş Ağdam Rayon Mərkəzi Xəstəxanasına göndərildi.',
+    sub: 'Elektron göndəriş uğurla təsdiq olunub mərkəzə yönləndirildi.'
   }
 };
 
+let currentAudio: HTMLAudioElement | null = null;
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 
-export function speakPrompt(key: VoicePromptKey, onStart?: () => void, onEnd?: () => void) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    return;
-  }
+// Audio element cache for instant playback
+const AUDIO_ELEMENTS: Partial<Record<VoicePromptKey, HTMLAudioElement>> = {};
 
-  try {
-    window.speechSynthesis.cancel();
-    const prompt = AI_PROMPTS[key];
-    if (!prompt) return;
-
-    const utterance = new SpeechSynthesisUtterance(prompt.az);
-    // Prefer Azerbaijani or Turkish if available
-    const voices = window.speechSynthesis.getVoices();
-    const azVoice = voices.find(v => v.lang.startsWith('az') || v.lang.startsWith('tr'));
-    if (azVoice) {
-      utterance.voice = azVoice;
-      utterance.lang = azVoice.lang;
-    } else {
-      utterance.lang = 'tr-TR'; // Turkish voice closely handles Azerbaijani phonetics gracefully
+if (typeof window !== 'undefined') {
+  // Preload known Azerbaijani audio files
+  const keys: VoicePromptKey[] = ['mediscan_start', 'mediscan_complete', 'welcome', 'done_drone'];
+  keys.forEach(k => {
+    try {
+      const a = new Audio(`/audio/${k}.wav`);
+      a.preload = 'auto';
+      AUDIO_ELEMENTS[k] = a;
+    } catch {
+      // ignore
     }
-    utterance.rate = 0.95; // Slightly measured and authoritative yet friendly
-    utterance.pitch = 1.0;
+  });
+}
 
-    utterance.onstart = () => {
-      onStart?.();
-    };
+/**
+ * Strictly searches for authentic Azerbaijani voice synthesizers only.
+ * NEVER returns Turkish voices to honor "Make speech in Azerbaijani, not in Turkish".
+ */
+function findStrictAzerbaijaniVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
 
-    utterance.onend = () => {
-      onEnd?.();
-    };
-
-    utterance.onerror = () => {
-      onEnd?.();
-    };
-
-    currentUtterance = utterance;
-    window.speechSynthesis.speak(utterance);
-  } catch (err) {
-    console.warn('Speech synthesis error, fallback to visual prompt:', err);
-    onEnd?.();
-  }
+  return voices.find(v => 
+    v.lang.toLowerCase().startsWith('az') || 
+    v.name.toLowerCase().includes('azerba') || 
+    v.name.toLowerCase().includes('azərbayc')
+  ) || null;
 }
 
 export function stopSpeaking() {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    window.speechSynthesis.cancel();
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch {
+      // ignore
+    }
+    currentAudio = null;
   }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+      currentUtterance = null;
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Plays speech using backend authentic Azerbaijani TTS API (`/api/tts`)
+ */
+async function playFromBackendTTS(text: string, onStart?: () => void, onEnd?: () => void): Promise<boolean> {
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+
+    if (!res.ok) return false;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+
+    audio.onplay = () => {
+      onStart?.();
+    };
+
+    audio.onended = () => {
+      currentAudio = null;
+      URL.revokeObjectURL(url);
+      onEnd?.();
+    };
+
+    audio.onerror = () => {
+      currentAudio = null;
+      URL.revokeObjectURL(url);
+      onEnd?.();
+    };
+
+    await audio.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Speaks raw Azerbaijani text. First tries Azerbaijani backend TTS, then strict Azerbaijani Web Speech.
+ * NEVER falls back to Turkish.
+ */
+export async function speakRawAzerbaijani(text: string, onStart?: () => void, onEnd?: () => void) {
+  stopSpeaking();
+
+  // 1. Try real-time Azerbaijani TTS endpoint
+  const played = await playFromBackendTTS(text, onStart, onEnd);
+  if (played) return;
+
+  // 2. Try strictly Azerbaijani browser voice (never Turkish)
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    const azVoice = findStrictAzerbaijaniVoice();
+    if (azVoice) {
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.voice = azVoice;
+        utterance.lang = azVoice.lang || 'az-AZ';
+        utterance.rate = 0.95;
+        utterance.onstart = () => onStart?.();
+        utterance.onend = () => {
+          onEnd?.();
+          currentUtterance = null;
+        };
+        utterance.onerror = () => {
+          onEnd?.();
+          currentUtterance = null;
+        };
+        currentUtterance = utterance;
+        window.speechSynthesis.speak(utterance);
+        return;
+      } catch {
+        onEnd?.();
+      }
+    }
+  }
+
+  onEnd?.();
+}
+
+/**
+ * Plays pre-recorded studio-grade Azerbaijani voice files (/audio/<key>.wav).
+ * Guarantees 100% Azerbaijani pronunciation with zero Turkish accents.
+ */
+export function speakPrompt(key: VoicePromptKey, onStart?: () => void, onEnd?: () => void) {
+  stopSpeaking();
+  const prompt = AI_PROMPTS[key];
+  const audioSrc = `/audio/${key}.wav`;
+
+  let audio = AUDIO_ELEMENTS[key];
+  if (!audio) {
+    audio = new Audio(audioSrc);
+    AUDIO_ELEMENTS[key] = audio;
+  }
+
+  currentAudio = audio;
+  audio.currentTime = 0;
+
+  let didFallback = false;
+  const triggerFallback = async () => {
+    if (didFallback) return;
+    didFallback = true;
+    currentAudio = null;
+    if (prompt) {
+      await speakRawAzerbaijani(prompt.az, onStart, onEnd);
+    } else {
+      onEnd?.();
+    }
+  };
+
+  audio.onplay = () => {
+    onStart?.();
+  };
+
+  audio.onended = () => {
+    currentAudio = null;
+    onEnd?.();
+  };
+
+  audio.onerror = () => {
+    triggerFallback();
+  };
+
+  audio.play().catch(() => {
+    triggerFallback();
+  });
+}
+
+/**
+ * Voice dispatcher: routes recognized phrases to pre-recorded authentic Azerbaijani audio
+ * or synthesizes directly via Azerbaijani TTS.
+ */
+export function speakCustomAzerbaijani(text: string, onStart?: () => void, onEnd?: () => void) {
+  const clean = text.toLowerCase().trim();
+
+  if (clean.includes('mediskaner') && (clean.includes('başla') || clean.includes('tezliklə') || clean.includes('nəticə'))) {
+    speakPrompt('mediscan_start', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('müayinə tamamlandı') || clean.includes('göstəriciləriniz normadadır')) {
+    speakPrompt('mediscan_complete', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('dron') && (clean.includes('yola salınır') || clean.includes('təsdiqləndi'))) {
+    speakPrompt('done_drone', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('şəxsi kabinet') || clean.includes('xoş gəlmisiniz')) {
+    speakPrompt('welcome', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('barmağınızı') || clean.includes('barmaq')) {
+    speakPrompt('fingerprint_prompt', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('kameraya baxın') || clean.includes('üz tanıma')) {
+    speakPrompt('face_prompt', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('xidməti seçin')) {
+    speakPrompt('service_select', onStart, onEnd);
+    return;
+  }
+
+  if (clean.includes('göndəriş') && clean.includes('xəstəxana')) {
+    speakPrompt('referral_sent', onStart, onEnd);
+    return;
+  }
+
+  speakRawAzerbaijani(text, onStart, onEnd);
 }

@@ -14,7 +14,7 @@ export const INITIAL_CITIZEN: CitizenProfile = {
   phone: '+994 50 482 19 02',
   address: 'Ağdam rayonu, Papravənd kəndi, ev 42',
   bloodType: 'A (II) Rh+',
-  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+  avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
   photoVerified: true,
   fingerprintVerified: true
 };
